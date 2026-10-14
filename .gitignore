@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.eggs/
+build/
+dist/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+
+# Lokale Konfiguration mit Geräte-/Netzdaten
+config.toml
+*.local.toml
+.env
+
+# Mitschnitte & reverse-engineerte Rohdaten (groß, gerätespezifisch)
+captures/*
+!captures/.gitkeep
+
+# Aus Windows exportierte Scanner-Einstellungen (können Pfade/Namen enthalten)
+*.ssf
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/

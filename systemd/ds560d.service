@@ -1,0 +1,23 @@
+# systemd-Unit-Template für den DS-560-Daemon.
+# Ziel-Host noch offen — <PLATZHALTER> vor der Installation anpassen und nach
+# /etc/systemd/system/ds560d.service kopieren (oder als --user-Unit).
+#
+#   systemctl daemon-reload
+#   systemctl enable --now ds560d.service
+
+[Unit]
+Description=Epson DS-560 Scan-Button Daemon
+# Netzwerk muss stehen, bevor der Scanner kontaktiert wird.
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=<PLATZHALTER_USER>
+WorkingDirectory=<PLATZHALTER_PFAD>
+ExecStart=<PLATZHALTER_PFAD>/.venv/bin/ds560d --config <PLATZHALTER_PFAD>/config.toml
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

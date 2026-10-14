@@ -1,0 +1,44 @@
+# Lokale Konfiguration für den DS-560-Daemon.
+# Kopie als config.toml anlegen (gitignored) und anpassen.
+
+[scanner]
+# Feste IP, falls im Router eine DHCP-Reservierung gesetzt ist.
+# Leer lassen, um den Scanner über seine MAC im Subnetz zu suchen.
+host = ""
+port = 1865
+
+# Für die Suche: MAC des Scanners und das Subnetz, in dem er hängt.
+# (Im Docker-Container nur mit --network host möglich.)
+mac = "aa:bb:cc:dd:ee:ff"
+subnet = "192.168.1.0/24"
+
+# Epson-Geräte-ID (aus #PRD.../INFO). Für den DS-560: ES00FA.
+device_id = "ES00FA"
+
+[session]
+# Keepalive-Intervall in Sekunden (deutlich unter der ~15-min-Grenze).
+keepalive_seconds = 60
+# Backoff beim Reconnect: Start- und Maximalwert in Sekunden.
+backoff_start_seconds = 1
+backoff_max_seconds = 60
+# Timeout, bis eine ausbleibende Antwort als Abbruch gilt.
+response_timeout_seconds = 30
+
+[scan]
+# Zielordner für die PDFs (später: Paperless-Consume-Ordner).
+output_dir = "~/Scans"
+# 300 oder 600 dpi. 300 reicht für OCR, ist schneller und ~4x kleiner.
+resolution = 300
+# "color" (24 bit), "gray" (8 bit) oder "mono" (Schwarzweiß)
+color = "color"
+# Vorder- und Rückseite scannen
+duplex = true
+# JPEG-Qualität 1–100 (wird im Scanner komprimiert)
+jpeg_quality = 85
+# Doppeleinzugserkennung: 0 = aus, 1 / 2 = Stufe (Firmware: DFL1 / DFL2)
+double_feed = 1
+# Schwelle für color = "mono", 0–255 (Epson Scan: 110)
+threshold = 110
+# Überscan am Seitenende (Epson Scan sendet ihn immer). false = Seiten
+# vermutlich knapper an der Papierlänge — noch nicht getestet.
+overscan = true
