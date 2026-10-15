@@ -22,7 +22,12 @@ def make_config(host: str | None = None) -> Config:
 def test_finder_keeps_last_ip_while_scanner_is_off(monkeypatch):
     sweeps = []
     arp = {"ips": ["192.0.2.79"]}
-    monkeypatch.setattr(daemon, "find_scanner", lambda *a, **k: sweeps.append(1) or arp["ips"])
+
+    def fake_find(mac, subnet, exclude=()):
+        sweeps.append(1)
+        return [ip for ip in arp["ips"] if ip not in exclude]
+
+    monkeypatch.setattr(daemon, "find_scanner", fake_find)
     monkeypatch.setattr(daemon, "lookup_arp", lambda mac: arp["ips"])
     clock = {"t": 1000.0}
     monkeypatch.setattr(daemon.time, "monotonic", lambda: clock["t"])
@@ -49,3 +54,21 @@ def test_finder_fixed_host(monkeypatch):
     finder = daemon.Finder(make_config("192.0.2.5"))
     assert finder.candidates() == ["192.0.2.5"]
     assert finder.sweep(["192.0.2.5"]) == []
+
+
+def test_find_scanner_returns_on_first_new_ip(monkeypatch):
+    from ds560 import discovery
+
+    calls = {"n": 0}
+
+    def fake_arp(mac):
+        calls["n"] += 1
+        return ["192.0.2.79"] + (["192.0.2.80"] if calls["n"] >= 3 else [])
+
+    monkeypatch.setattr(discovery, "sweep", lambda subnet: None)
+    monkeypatch.setattr(discovery, "lookup_arp", fake_arp)
+    monkeypatch.setattr(discovery.time, "sleep", lambda s: None)
+    # Veraltete, schon probierte IP beendet die Suche nicht; die neue schon.
+    assert discovery.find_scanner("aa:bb:cc:dd:ee:ff", "192.0.2.0/24",
+                                  exclude=["192.0.2.79"]) == ["192.0.2.80"]
+    assert calls["n"] == 3

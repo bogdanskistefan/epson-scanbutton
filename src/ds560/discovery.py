@@ -13,12 +13,14 @@ import ipaddress
 import logging
 import socket
 import time
+from collections.abc import Iterable
 from pathlib import Path
 
 log = logging.getLogger(__name__)
 
 ARP_TABLE = Path("/proc/net/arp")
 _DISCARD_PORT = 9  # UDP "discard": Inhalt egal, es geht nur um die ARP-Anfrage
+_SWEEP_CHUNK = 32  # Hosts pro Socket, siehe sweep()
 
 
 def lookup_arp(mac: str) -> list[str]:
@@ -42,32 +44,37 @@ def lookup_arp(mac: str) -> list[str]:
 
 
 def sweep(subnet: str) -> None:
-    """Je ein UDP-Paket an alle Hosts des Subnetzes, damit der Kernel ARP auflöst."""
-    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
-        for host in ipaddress.ip_network(subnet, strict=False).hosts():
-            try:
-                s.sendto(b"", (str(host), _DISCARD_PORT))
-            except OSError:
-                pass
+    """Je ein UDP-Paket an alle Hosts des Subnetzes, damit der Kernel ARP auflöst.
+
+    Pakete an noch unaufgelöste Adressen belegen den Sendepuffer, bis ARP
+    antwortet oder aufgibt (~3 s); über einen einzigen Socket blockiert
+    ``sendto`` nach gut 200 Paketen. Daher je ``_SWEEP_CHUNK`` Hosts ein Socket.
+    """
+    hosts = [str(h) for h in ipaddress.ip_network(subnet, strict=False).hosts()]
+    for i in range(0, len(hosts), _SWEEP_CHUNK):
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            for host in hosts[i : i + _SWEEP_CHUNK]:
+                try:
+                    s.sendto(b"", (host, _DISCARD_PORT))
+                except OSError:
+                    pass
 
 
 def find_scanner(
-    mac: str, subnet: str, fresh: bool = False, wait_seconds: float = 3.0
+    mac: str, subnet: str, exclude: Iterable[str] = (), wait_seconds: float = 2.0
 ) -> list[str]:
-    """Kandidaten-IPs zu ``mac``: aus dem ARP-Cache, sonst nach einem Sweep.
+    """Subnetz absuchen und IPs zu ``mac`` liefern, außer denen in ``exclude``.
 
-    ``fresh`` erzwingt den Sweep, z. B. wenn keine IP aus dem Cache erreichbar
-    war. Dann wird die volle Wartezeit abgewartet, damit neue Einträge auftauchen.
+    Kehrt zurück, sobald eine neue IP im ARP-Cache auftaucht, spätestens nach
+    ``wait_seconds``. ``exclude`` sind bereits erfolglos probierte IPs — ihr
+    ARP-Eintrag kann veraltet sein und darf die Suche nicht vorzeitig beenden.
     """
-    if not fresh:
-        ips = lookup_arp(mac)
-        if ips:
-            return ips
+    exclude = set(exclude)
     log.info("Suche Scanner %s in %s", mac, subnet)
     sweep(subnet)
     deadline = time.monotonic() + wait_seconds
-    while time.monotonic() < deadline:
-        time.sleep(0.5)
-        if not fresh and lookup_arp(mac):
-            break
-    return lookup_arp(mac)
+    while True:
+        found = [ip for ip in lookup_arp(mac) if ip not in exclude]
+        if found or time.monotonic() >= deadline:
+            return found
+        time.sleep(0.1)

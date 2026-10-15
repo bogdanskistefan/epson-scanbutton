@@ -86,6 +86,11 @@ A transaction:
 4. If the length is > 0, fetch the data block with an empty `0x2000` frame whose
    reply length equals that length.
 
+`#nrdNONE` means ready. Right after reconnecting, the scanner sometimes answers
+`#nrdBUSY` with length 0 for about 3 s (each reply delayed by ~1 s); the
+command has to be repeated until it reports `NONE`. Observed once directly
+after the previous session was released; the exact trigger is unknown.
+
 Parameters and replies are sequences of `#` tokens: a 3-letter name followed by
 a value (`d` + 3 decimal digits, `i` + 7 decimal digits, `x` + 7 hex digits,
 `h` + 3 hex digits length + string).

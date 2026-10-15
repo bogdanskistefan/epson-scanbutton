@@ -11,11 +11,15 @@ from __future__ import annotations
 import logging
 import re
 import socket
+import time
 from collections import deque
 
 from . import protocol as p
 
 log = logging.getLogger(__name__)
+
+BUSY_TIMEOUT = 15.0  # so lange wird ein #nrdBUSY-Befehl wiederholt
+BUSY_RETRY_INTERVAL = 0.2
 
 
 class ProtocolError(RuntimeError):
@@ -88,7 +92,22 @@ class Link:
 
     def esci2(self, cmd: bytes, params: bytes = b"") -> tuple[p.Reply, bytes]:
         """Ein ESC/I-2-Befehl: Kopf (+Parameter) senden, Antwortkopf lesen,
-        ggf. den Datenblock abholen."""
+        ggf. den Datenblock abholen.
+
+        Antwortet der Scanner mit ``#nrdBUSY`` (z. B. kurz nach dem Ende der
+        vorigen Sitzung), wird der Befehl wiederholt, bis er bereit ist.
+        """
+        deadline = time.monotonic() + BUSY_TIMEOUT
+        while True:
+            reply, data = self._esci2_once(cmd, params)
+            if p.NRD_BUSY not in reply.tokens:
+                return reply, data
+            if time.monotonic() >= deadline:
+                raise ProtocolError(f"Scanner meldet seit {BUSY_TIMEOUT:.0f} s BUSY auf {cmd!r}")
+            log.debug("%r: Scanner BUSY, wiederhole", cmd)
+            time.sleep(BUSY_RETRY_INTERVAL)
+
+    def _esci2_once(self, cmd: bytes, params: bytes) -> tuple[p.Reply, bytes]:
         if params:
             self.transact(p.esci2_header(cmd, len(params)), 0)
             header = self.transact(params, p.ESCI2_REPLY_HEADER_LEN)

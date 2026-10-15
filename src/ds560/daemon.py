@@ -62,7 +62,7 @@ class Finder:
         if sc.host or time.monotonic() - self.last_sweep < interval:
             return []
         self.last_sweep = time.monotonic()
-        return [ip for ip in find_scanner(sc.mac, sc.subnet, fresh=True) if ip not in tried]
+        return find_scanner(sc.mac, sc.subnet, exclude=tried)
 
     def connected(self, host: str) -> None:
         self.last_ok = host

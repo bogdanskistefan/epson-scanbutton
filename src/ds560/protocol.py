@@ -79,6 +79,7 @@ CMD_FIN = b"FIN "
 
 ESCI2_CMD_HEADER_LEN = 12
 ESCI2_REPLY_HEADER_LEN = 64
+NRD_BUSY = b"#nrdBUSY"  # Antwort-Token: Scanner noch nicht bereit
 
 # Im IMG-/STAT-Kopf: Einzug leer, Scan beendet.
 ERR_ADF_EMPTY = b"#ERRADF PE"
