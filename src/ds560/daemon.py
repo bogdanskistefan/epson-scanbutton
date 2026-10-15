@@ -1,9 +1,17 @@
-"""Einstiegspunkt des Daemons: Dauerschleife mit Reconnect und Backoff.
+"""Einstiegspunkt des Daemons: Dauerschleife mit Reconnect.
 
-Der Daemon läuft „always on": nach jedem Verbindungsabbruch wird mit wachsender
-Wartezeit (backoff_start -> backoff_max) neu verbunden. Vor jedem Neuaufbau
-wird die Scanner-IP neu ermittelt. Eine regulär abgelaufene Sitzung (0x9000/80)
-wird ohne Wartezeit neu aufgebaut.
+Der Daemon läuft „always on". Zwei Fälle werden unterschieden:
+
+- **Scanner nicht erreichbar** (aus, Energiesparen, noch nicht im WLAN): der
+  Normalfall, kein Fehler. Es wird alle ``offline_poll_seconds`` die zuletzt
+  bekannte IP angefragt, damit die Sitzung steht, bevor jemand nach dem
+  Einschalten den Knopf drückt — einen Knopfdruck ohne Sitzung vergisst der
+  Scanner. Alle ``sweep_interval_seconds`` wird zusätzlich das Subnetz nach
+  der MAC abgesucht, falls DHCP eine neue IP vergeben hat.
+- **Fehler in einer bestehenden Verbindung** (Protokoll, Lock abgelehnt …):
+  Neuaufbau mit wachsender Wartezeit (backoff_start -> backoff_max).
+
+Eine regulär abgelaufene Sitzung (0x9000/80) wird sofort neu aufgebaut.
 """
 
 from __future__ import annotations
@@ -15,20 +23,49 @@ import sys
 import time
 
 from .config import Config, load_config
-from .discovery import find_scanner
+from .discovery import find_scanner, lookup_arp
 from .session import Session, SessionEnded
 
 log = logging.getLogger("ds560d")
 
 
-def candidate_hosts(config: Config, fresh: bool) -> list[str]:
-    """Feste IP aus der Konfiguration, sonst Suche über die MAC."""
-    sc = config.scanner
-    if sc.host:
-        return [sc.host]
-    if sc.mac and sc.subnet:
-        return find_scanner(sc.mac, sc.subnet, fresh=fresh)
-    raise SystemExit("config.toml: entweder scanner.host oder scanner.mac + scanner.subnet setzen")
+class Finder:
+    """Liefert Kandidaten-IPs; die zuletzt erfolgreiche IP immer zuerst.
+
+    Ist der Scanner aus, fällt sein ARP-Eintrag weg — die gemerkte IP bleibt,
+    so dass er nach dem Einschalten ohne Sweep sofort gefunden wird. Gesweept
+    wird nur, wenn keine bekannte IP antwortet, und höchstens alle
+    ``sweep_interval_seconds``.
+    """
+
+    def __init__(self, config: Config) -> None:
+        self.config = config
+        self.last_ok: str | None = config.scanner.host
+        self.last_sweep = float("-inf")
+        sc = config.scanner
+        if not (sc.host or (sc.mac and sc.subnet)):
+            raise SystemExit(
+                "config.toml: entweder scanner.host oder scanner.mac + scanner.subnet setzen")
+
+    def candidates(self) -> list[str]:
+        """Schnelle Kandidaten ohne Netzlast: gemerkte IP + ARP-Cache."""
+        sc = self.config.scanner
+        if sc.host:
+            return [sc.host]
+        hosts = [self.last_ok] if self.last_ok else []
+        return hosts + [ip for ip in lookup_arp(sc.mac) if ip not in hosts]
+
+    def sweep(self, tried: list[str]) -> list[str]:
+        """Neue Kandidaten per Subnetz-Sweep, falls fällig; sonst leer."""
+        sc = self.config.scanner
+        interval = self.config.session.sweep_interval_seconds
+        if sc.host or time.monotonic() - self.last_sweep < interval:
+            return []
+        self.last_sweep = time.monotonic()
+        return [ip for ip in find_scanner(sc.mac, sc.subnet, fresh=True) if ip not in tried]
+
+    def connected(self, host: str) -> None:
+        self.last_ok = host
 
 
 def _terminate(signum, _frame):
@@ -40,6 +77,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--config", default="config.toml", help="Pfad zur config.toml")
     parser.add_argument("--log-level", default="INFO")
     parser.add_argument("--trace", action="store_true", help="jeden IS-Rahmen loggen (DEBUG)")
+    parser.add_argument("--buttons-only", action="store_true",
+                        help="Knopfdrücke nur protokollieren, nicht scannen (Diagnose)")
     args = parser.parse_args(argv)
 
     logging.basicConfig(
@@ -51,41 +90,57 @@ def main(argv: list[str] | None = None) -> int:
     signal.signal(signal.SIGTERM, _terminate)
 
     config = load_config(args.config)
-    backoff = config.session.backoff_start_seconds
-    fresh = False
+    se = config.session
+    finder = Finder(config)
+    backoff = se.backoff_start_seconds
+    offline_since: float | None = None
 
     log.info("DS-560-Daemon startet (Gerät %s)", config.scanner.device_id)
     while True:
-        hosts = candidate_hosts(config, fresh)
-        if not hosts:
-            log.warning("Scanner nicht gefunden, neuer Versuch in %s s", backoff)
-        for host in hosts:
-            session = Session(config, host, trace=args.trace)
+        delay: float | None = None  # None: kein Kandidat erreichbar
+        tried: list[str] = []
+        hosts = finder.candidates() or finder.sweep([])
+        while delay is None and hosts:
+            host = hosts.pop(0)
+            tried.append(host)
+            session = Session(config, host, trace=args.trace, scan=not args.buttons_only)
             try:
-                session.connect()
-                backoff = config.session.backoff_start_seconds  # Reset nach Erfolg
-                fresh = False
+                try:
+                    session.connect()
+                except OSError as exc:
+                    log.debug("%s nicht erreichbar: %s", host, exc)
+                    if not hosts:
+                        hosts = finder.sweep(tried)
+                    continue
+                finder.connected(host)
+                if offline_since is not None:
+                    log.info("Scanner wieder erreichbar (nach %.0f s)",
+                             time.monotonic() - offline_since)
+                offline_since = None
+                backoff = se.backoff_start_seconds
                 session.run_until_disconnect()
             except SessionEnded as exc:
                 log.info("%s — verbinde neu", exc)
-                backoff = 0
-                break
+                delay = 0
             except OSError as exc:
-                log.warning("Verbindung zu %s: %s", host, exc)
+                # Bestehende Verbindung weg, meist ausgeschaltet: sofort neu prüfen,
+                # damit die Sitzung nach dem Einschalten schnell wieder steht.
+                log.warning("Verbindung zu %s verloren: %s", host, exc)
+                delay = 0
             except Exception:  # noqa: BLE001 — Daemon soll nie durchfallen
-                log.exception("Sitzung mit %s abgebrochen", host)
+                log.exception("Sitzung mit %s abgebrochen, neuer Versuch in %s s", host, backoff)
+                delay = backoff
+                backoff = min(backoff * 2, se.backoff_max_seconds)
             finally:
                 session.close()
-        else:
-            # Kein Host lieferte eine Sitzung: beim nächsten Mal neu suchen.
-            fresh = True
 
-        if backoff:
-            log.info("Reconnect in %s s", backoff)
-            time.sleep(backoff)
-        backoff = min(max(backoff * 2, config.session.backoff_start_seconds),
-                      config.session.backoff_max_seconds)
-
+        if delay is None:
+            if offline_since is None:
+                offline_since = time.monotonic()
+                log.warning("Scanner nicht erreichbar — prüfe alle %s s", se.offline_poll_seconds)
+            delay = se.offline_poll_seconds
+        if delay:
+            time.sleep(delay)
 
 if __name__ == "__main__":
     sys.exit(main())

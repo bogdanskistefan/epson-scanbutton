@@ -16,13 +16,25 @@ subnet = "192.168.1.0/24"
 device_id = "ES00FA"
 
 [session]
-# Keepalive-Intervall in Sekunden (deutlich unter der ~15-min-Grenze).
-keepalive_seconds = 60
+# Keepalive-Intervall in Sekunden (deutlich unter der ~15-min-Grenze). Kurz
+# halten: wird der Scanner aus- und wieder eingeschaltet, fällt die tote
+# Verbindung erst beim nächsten Keepalive auf.
+keepalive_seconds = 10
 # Backoff beim Reconnect: Start- und Maximalwert in Sekunden.
 backoff_start_seconds = 1
 backoff_max_seconds = 60
 # Timeout, bis eine ausbleibende Antwort als Abbruch gilt.
 response_timeout_seconds = 30
+# Scanner aus/nicht im WLAN: so oft wird die letzte bekannte IP angefragt.
+# Ein Knopfdruck vor dem Aufbau der Sitzung geht verloren — daher kurz.
+offline_poll_seconds = 2
+# Timeout für den TCP-Verbindungsaufbau.
+connect_timeout_seconds = 3
+# Alle so viele Sekunden das Subnetz nach der MAC absuchen (neue DHCP-IP).
+sweep_interval_seconds = 30
+# Bleibt ein Keepalive so lange unbestätigt, gilt der Scanner als aus.
+# Zusammen mit keepalive_seconds: Ausschalten fällt nach spätestens ~15 s auf.
+dead_after_seconds = 5
 
 [scan]
 # Zielordner für die PDFs (später: Paperless-Consume-Ordner).

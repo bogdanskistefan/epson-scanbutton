@@ -33,18 +33,28 @@ class SessionEnded(Exception):
 class Session:
     """Eine Verbindung zum Scanner, mit Handshake, Keepalive und Scan-Lauf."""
 
-    def __init__(self, config: Config, host: str, trace: bool = False) -> None:
+    def __init__(self, config: Config, host: str, trace: bool = False,
+                 scan: bool = True) -> None:
         self.config = config
         self.host = host
         self.trace = trace
+        self.scan = scan  # False: Knopfdrücke nur protokollieren (Diagnose)
         self.sock: socket.socket | None = None
         self.link: Link | None = None
         self.locked = False
 
     def connect(self) -> None:
         """TCP 1865 öffnen, Begrüßung abwarten, Lock + Handshake senden."""
-        timeout = self.config.session.response_timeout_seconds
-        self.sock = socket.create_connection((self.host, self.config.scanner.port), timeout=timeout)
+        se = self.config.session
+        self.sock = socket.create_connection((self.host, self.config.scanner.port),
+                                             timeout=se.connect_timeout_seconds)
+        self.sock.settimeout(se.response_timeout_seconds)
+        # Ein ausgeschalteter Scanner schließt die Verbindung nicht; Keepalives
+        # landen dann nur im Sendepuffer. Mit TCP_USER_TIMEOUT bricht der Kernel
+        # ab, sobald gesendete Daten so lange unbestätigt bleiben.
+        if hasattr(socket, "TCP_USER_TIMEOUT"):
+            self.sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_USER_TIMEOUT,
+                                 int(se.dead_after_seconds * 1000))
         self.link = Link(self.sock, trace=self.trace)
         self.link.open()
         self.locked = True
@@ -85,7 +95,8 @@ class Session:
     def _on_notification(self, value: int) -> None:
         if value == p.NOTIFY_BUTTON:
             log.info("Scan-Knopf gedrückt")
-            self.perform_scan()
+            if self.scan:
+                self.perform_scan()
         elif value == p.NOTIFY_SESSION_END:
             raise SessionEnded("Scanner beendet die Sitzung (0x9000/80)")
         else:

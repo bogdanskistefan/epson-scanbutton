@@ -21,6 +21,15 @@ cover is the push notification for the scan button.
   tested in detail).
 - The scanner drops an idle session after about 15 minutes. A keepalive
   (`0x1000`) every 60 s keeps it open.
+- When the scanner is switched off (by hand or by its power-off timer) it does
+  **not** close the connection. The host only notices because its keepalives
+  stay unacknowledged on TCP level; after power-on the scanner answers the old
+  connection with a TCP reset. A button press while no session is open is not
+  queued: it is lost and the scanner shows its error light.
+- After a button notification, further presses are not reported for about
+  3 s (observed: two or three quick presses give one `0x9000`, presses one
+  second apart give one notification every ~3 s). Counting presses is
+  therefore not practical.
 - Other interfaces of the DS-560 (firmware `IPL 1.00 / ADF 1.05`): only TCP 80
   (Web Config) is open besides 1865. No eSCL, IPP, WSD, mDNS or SSDP.
 

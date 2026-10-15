@@ -37,6 +37,10 @@ class SessionConfig:
     backoff_start_seconds: int
     backoff_max_seconds: int
     response_timeout_seconds: int
+    connect_timeout_seconds: float
+    offline_poll_seconds: float
+    sweep_interval_seconds: float
+    dead_after_seconds: float
 
 
 @dataclass
@@ -96,10 +100,14 @@ def load_config(path: str | Path) -> Config:
             subnet=s.get("subnet") or None,
         ),
         session=SessionConfig(
-            keepalive_seconds=int(se.get("keepalive_seconds", 60)),
+            keepalive_seconds=int(se.get("keepalive_seconds", 10)),
             backoff_start_seconds=int(se.get("backoff_start_seconds", 1)),
             backoff_max_seconds=int(se.get("backoff_max_seconds", 60)),
             response_timeout_seconds=int(se.get("response_timeout_seconds", 30)),
+            connect_timeout_seconds=float(se.get("connect_timeout_seconds", 3)),
+            offline_poll_seconds=float(se.get("offline_poll_seconds", 2)),
+            sweep_interval_seconds=float(se.get("sweep_interval_seconds", 30)),
+            dead_after_seconds=float(se.get("dead_after_seconds", 5)),
         ),
         scan=ScanConfig(
             output_dir=Path(sc["output_dir"]).expanduser(),
