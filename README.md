@@ -29,8 +29,8 @@ Tested with an **Epson DS-560** (firmware `IPL 1.00 / ADF 1.05`). Other Epson
 network document scanners with ESC/I-2 (e.g. DS-570W, DS-770, DS-780N) may
 speak the same protocol — not tested. Reports are welcome.
 
-Not yet done: blank page removal, retry/spool when the target folder is
-unreachable, packaging.
+Not yet done: retry/spool when the target folder is unreachable. Blank pages
+are removed downstream (see [Paperless-ngx: blank pages](#paperless-ngx-blank-pages)).
 
 ## Setup
 
@@ -57,13 +57,53 @@ Check connectivity without scanning:
 ### Running as a service
 
 `systemd/ds560d.service` is a template; fill in the placeholders and install
-it as a system or user unit. In a container, scanner discovery by MAC needs
+it as a system or user unit.
+
+### Running in Docker
+
+An image is built on every push to `main`:
+`ghcr.io/bogdanskistefan/epson-scanbutton:latest`. It reads
+`/config/config.toml`; mount the target folder at the path `output_dir` names.
+
+```bash
+docker run -d --name ds560d --restart unless-stopped \
+  --network host \
+  --user 99:100 \
+  -v /path/to/ds560d/config.toml:/config/config.toml:ro \
+  -v /path/to/paperless/consume:/consume \
+  ghcr.io/bogdanskistefan/epson-scanbutton:latest
+```
+
+with `output_dir = "/consume"` in the config. Scanner discovery by MAC needs
 `--network host`; with a fixed `host` in the config, bridge networking works.
+`--user` should match the owner of the target folder (`99:100` on Unraid).
+Run only one instance: the scanner reports the button only to the client that
+holds its session.
 
 ## Configuration
 
 See [`config.example.toml`](config.example.toml). The `[scan]` values are
 checked against what the scanner supports (`CAPA`).
+
+## Paperless-ngx: blank pages
+
+The scanner cannot skip blank pages, and Paperless-ngx has no built-in option
+for it. [`contrib/paperless/remove-blank-pages.sh`](contrib/paperless/remove-blank-pages.sh)
+is a pre-consume script based on the blank-page example in the
+[Paperless-ngx wiki](https://github.com/paperless-ngx/paperless-ngx/wiki/Pre-Consume-Script-Examples).
+It decides on black coverage only: Ghostscript's `ink_cov` counts the paper
+tone of a colour scan as cyan/magenta/yellow, so the wiki's CMYK sum does not
+separate blank from printed pages. It only touches files written by the daemon
+(`scan_*.pdf`) and never removes all pages.
+
+```
+PAPERLESS_PRE_CONSUME_SCRIPT=/usr/src/paperless/data/scripts/remove-blank-pages.sh
+BLANK_PAGE_MAX_K=0.2   # optional; percent black below which a page counts as blank
+```
+
+When you split documents with PATCH T sheets, print the sheet on both sides:
+Paperless then removes both sides (see "Interaction with document splitting"
+in the Paperless-ngx docs).
 
 ## How it works
 
