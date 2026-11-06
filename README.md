@@ -69,6 +69,7 @@ An image is built on every push to `main`:
 docker run -d --name ds560d --restart unless-stopped \
   --network host \
   --user 99:100 \
+  -v /etc/localtime:/etc/localtime:ro \
   -v /path/to/ds560d/config.toml:/config/config.toml:ro \
   -v /path/to/paperless/consume:/consume \
   ghcr.io/bogdanskistefan/epson-scanbutton:latest
@@ -76,7 +77,8 @@ docker run -d --name ds560d --restart unless-stopped \
 
 with `output_dir = "/consume"` in the config. Scanner discovery by MAC needs
 `--network host`; with a fixed `host` in the config, bridge networking works.
-`--user` should match the owner of the target folder (`99:100` on Unraid).
+`--user` should match the owner of the target folder (`99:100` on Unraid);
+the `/etc/localtime` mount makes file names use local time instead of UTC.
 Run only one instance: the scanner reports the button only to the client that
 holds its session.
 
