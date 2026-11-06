@@ -7,6 +7,10 @@ license = "Apache-2.0"
 requires-python = ">=3.11"
 dependencies = []
 
+[project.optional-dependencies]
+# Nur für die Tests (Bilder prüfen); der Daemon selbst braucht nichts.
+test = ["pytest", "pillow"]
+
 [project.scripts]
 ds560d = "ds560.daemon:main"
 
